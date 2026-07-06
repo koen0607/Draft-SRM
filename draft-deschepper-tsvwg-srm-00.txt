@@ -1,0 +1,616 @@
+
+
+
+
+Transport Area Working Group                              K. De Schepper
+Internet-Draft                                                  M. Vrana
+Intended status: Standards Track                                   Nokia
+Expires: 4 January 2027                                      3 July 2026
+
+
+  Static Rate Management (SRM) for Low Latency, Low Loss, and Scalable
+                            Throughput (L4S)
+                     draft-deschepper-tsvwg-srm-00
+
+Abstract
+
+   This document describes the Static Rate Management (SRM) solution for
+   L4S (Low Latency, Low Loss, Scalable Throughput) rate control.  SRM
+   utilizes a Two-Rate, Three-Color Marker (trTCM) policer in
+   conjunction with a dual-queue mechanism to provide low latency and
+   low loss for L4S flows in environments where a fixed, safe rate can
+   be reliably defined for a network link or segment.  This approach
+   offers an alternative to Active Queue Management (AQM)-based L4S
+   solutions, particularly for high-speed and aggregated networks with
+   limited packet processing capabilities.  This document details the
+   operation, advantages, disadvantages, and configuration guidelines
+   for SRM.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on 4 January 2027.
+
+Copyright Notice
+
+   Copyright (c) 2026 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 1]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents (https://trustee.ietf.org/
+   license-info) in effect on the date of publication of this document.
+   Please review these documents carefully, as they describe your rights
+   and restrictions with respect to this document.  Code Components
+   extracted from this document must include Revised BSD License text as
+   described in Section 4.e of the Trust Legal Provisions and are
+   provided without warranty as described in the Revised BSD License.
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . . .   2
+   2.  Terminology . . . . . . . . . . . . . . . . . . . . . . . . .   3
+   3.  Static Rate Management (SRM) for L4S  . . . . . . . . . . . .   4
+     3.1.  Overview  . . . . . . . . . . . . . . . . . . . . . . . .   4
+     3.2.  Operation . . . . . . . . . . . . . . . . . . . . . . . .   5
+     3.3.  Marking and Dropping Logic  . . . . . . . . . . . . . . .   5
+     3.4.  Advantages  . . . . . . . . . . . . . . . . . . . . . . .   5
+     3.5.  Disadvantages . . . . . . . . . . . . . . . . . . . . . .   6
+     3.6.  Two-Rate, Three-Color Marker (trTCM) Configuration  . . .   6
+       3.6.1.  Burst Time  . . . . . . . . . . . . . . . . . . . . .   7
+       3.6.2.  Peak Information Rate (PIR) Dimensioning  . . . . . .   7
+       3.6.3.  Committed Information Rate (CIR) and Excess
+               Marking . . . . . . . . . . . . . . . . . . . . . . .   7
+       3.6.4.  PIR/CIR Ratio . . . . . . . . . . . . . . . . . . . .   8
+       3.6.5.  CIR Dimensioning  . . . . . . . . . . . . . . . . . .   9
+   4.  Security Considerations . . . . . . . . . . . . . . . . . . .   9
+   5.  Contributors  . . . . . . . . . . . . . . . . . . . . . . . .   9
+   6.  IANA Considerations . . . . . . . . . . . . . . . . . . . . .   9
+   7.  Normative References  . . . . . . . . . . . . . . . . . . . .   9
+   Authors' Addresses  . . . . . . . . . . . . . . . . . . . . . . .  10
+
+1.  Introduction
+
+   The Internet's evolution has led to an increasing demand for
+   Applications that require low latency and low loss, such as real-time
+   communication, online gaming, and industrial control.  Traditional
+   TCP congestion control mechanisms, while robust, often introduce
+   significant queuing delay under load, which can degrade the
+   performance of these latency-sensitive applications.
+
+   L4S (Low Latency, Low Loss, Scalable Throughput) is a set of
+   mechanisms designed to address this challenge by enabling network
+   elements to signal incipient congestion to L4S-capable transport
+   protocols using the L4S mode of Explicit Congestion Notification
+   (ECN) redefined in [RFC9331] from the original Classic ECN in
+   [RFC3168], specifically, the ECT(1) codepoint.  [RFC8311] made it
+   possible to enable experiments in which ECT(1) is used differently.
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 2]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   This allows L4S senders to react to congestion before queues build
+   up, maintaining low latency and low loss while achieving high
+   throughput.  [RFC9330] describes the overall L4S architecture and
+   requirements.
+
+   While many L4S solutions rely on Active Queue Management (AQM)
+   mechanisms to detect and signal congestion, this document proposes an
+   alternative: Static Rate Management (SRM).  SRM is particularly
+   suited for scenarios where a "safe" and fixed rate can be defined for
+   L4S traffic on a given link, offering a simpler deployment model
+   without the need for building and monitoring queues.  SRM directly
+   manages the aggregate rate of applications and represents an
+   alternative to the Dual-Queue coupled AQM algorithm [RFC9332], which
+   is still necessary for connections with variable rate.  This document
+   describes the SRM solution, its operational principles, and
+   configuration guidelines.
+
+2.  Terminology
+
+   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+   "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+   "OPTIONAL" in this document are to be interpreted as described in BCP
+   14 [RFC2119] [RFC8174] when, and only when, they appear in all
+   capitals, as shown here.
+
+   This document uses the following terms:
+
+   *  L4S: Low Latency, Low Loss, Scalable Throughput.  A set of
+      mechanisms for congestion control that aims to provide low latency
+      and low loss for specific traffic.
+
+   *  ECN: Explicit Congestion Notification [RFC3168] and [RFC8311].  A
+      mechanism where network devices can signal congestion to endpoints
+      without dropping packets.
+
+   *  ECT(0): ECN Capable Transport (0).  A codepoint set by the
+      application or transport layer stack in the IP ECN field
+      indicating that the transport is ECN-capable but uses Classic
+      congestion control.
+
+   *  ECT(1): ECN Capable Transport (1).  A codepoint set by the
+      application or transport layer stack in the IP ECN field
+      indicating that the transport is ECN-capable and uses L4S
+      congestion control.
+
+   *  NotECT: Not ECN Capable Transport.  The default codepoint in the
+      IP ECN field indicating that the transport is not ECN-capable.
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 3]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   *  CE: Congestion Experienced.  A codepoint in the IP ECN field set
+      by the network to indicate that congestion has been experienced.
+
+   *  CIR: Committed Information Rate.  The guaranteed rate for a
+      traffic flow, below which packets are typically marked green (in-
+      profile).  In SRM, this is the rate below which L4S packets are
+      not CE-marked.  Above this rate markets are yellow, in SRM: CE-
+      marked.
+
+   *  PIR: Peak Information Rate.  The maximum rate allowed for a
+      traffic flow, above which packets are typically marked red (out-
+      of-profile) and dropped.  In SRM, this is the rate above which L4S
+      packets are dropped.
+
+   *  trTCM: Two-Rate, Three-Color Marker [RFC2698].  A traffic policer
+      that marks packets based on two rates (CIR and PIR) and two
+      associated burst sizes, resulting in three possible colors (green,
+      yellow, red).
+
+   *  RTT: Round-Trip Time.  The time it takes for a signal to be sent
+      and the acknowledgment of that signal to be received.
+
+   *  SRM: Static Rate Management.  The solution described in this
+      document.
+
+3.  Static Rate Management (SRM) for L4S
+
+3.1.  Overview
+
+   The Static Rate Management (SRM) solution for L4S flows leverages
+   equipment supporting [RFC2698] by utilizing a standard policer with a
+   Two-Rate, Three-Color Marker (trTCM).  This approach serves as an
+   alternative to AQM-based L4S solutions, particularly suitable for
+   scenarios where a "safe" (non-blocking) and fixed rate can be defined
+   on a fixed-rate link.
+
+   This solution is applicable across a wide range of link speeds, from
+   Mbps to Tbps.  It is especially interesting for very high-speed and
+   aggregated networks where queue size access and AQM algorithms might
+   introduce complexity or be challenging to implement when packet
+   processing capabilities are limited.  The only packet processing
+   required at the point of SRM application is for setting the CE
+   marking bit, or a lower layer bit or codepoint that can later be
+   moved into the IP ECN field by edge nodes.
+
+
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 4]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+3.2.  Operation
+
+   The SRM solution operates by configuring non-coupled dual queues and
+   applying a trTCM policer to the L4S queue:
+
+   *  Dual Queue Configuration: Two parallel queues MUST be configured
+      for the same traffic class:
+
+      -  An L4S queue for packets marked with ECT(1) and CE.
+
+      -  A Classic queue for packets marked with ECT(0) and NotECT.
+
+   *  Priority and Policer Application: The L4S queue MUST be given
+      priority over the Classic queue.  This priority SHOULD be strict
+      or can be at a high enough weight to prevent latency for the
+      mostly empty L4S queue.  A Two-Rate, Three-Color Marker (trTCM)
+      policer MUST be applied to the L4S queue.
+
+3.3.  Marking and Dropping Logic
+
+   The trTCM policer applied to the L4S queue operates as follows:
+
+   *  CE Marking: The policer marks packets as CE if their rate exceeds
+      the configured Committed Information Rate (CIR) (yellow state).
+      This signals a rate limit to L4S-capable endpoints.  Marks will be
+      evenly spread over different flows in the aggregate, resulting in
+      approximate equal rates for all flows in the aggregate.
+
+   *  Packet Dropping: Packets are dropped if their rate exceeds the
+      Peak Information Rate (PIR) (red state).  The PIR serves as a
+      protection mechanism to prevent misuse by non-responsive traffic
+      and to protect Classic flows from being starved by excessive L4S
+      traffic.
+
+3.4.  Advantages
+
+   *  No Queuing Delay: This approach avoids generating additional
+      queuing latency for L4S flows, as it does not rely on AQM
+      thresholds that inherently relies on delay.  "Congestion" is
+      signalled via rate excess rather than queue build-up.
+
+   *  Predictable Performance: SRM provides predictable performance for
+      L4S traffic within the defined rate limits (CIR and PIR).  The
+      rate is only limited by the number of applications that are
+      active.  This can be beneficial for applications requiring a low
+      rate resulting in consistent quality of service.
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 5]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   *  Isolation between L4S and Classic: An SRM configuration provides
+      isolation between misbehaving and broken congestion controls in
+      one traffic class to the other.  Non-behaving or overloaded L4S
+      traffic is limited by the PIR rate, protecting the aggregate
+      Classic left-over rate, and on the other hand, non-behaving or
+      overloaded Classic traffic cannot harm the L4S traffic which is
+      prioritized (but limited between CIR and PIR).
+
+   *  Scalability for Network Segments: A single strategic bottleneck or
+      edge node where SRM trTCM is applied can ensure that other parts
+      of a network with higher non-blocking (overprovisioned) capacities
+      only need to implement the priority queue for L4S, without the
+      need for additional marking policers.  This simplifies
+      configuration in larger network segments.  The marking rate limit
+      can be at any place in the NW to perform its rate limiting
+      functionality.  The dropping policer functionality is recommended
+      to be performed at the ingress, to prevent that the excess PIR
+      rate will cause latency and Classic starvation on previous network
+      links and elements.  Due to this property, it is also possible to
+      have 2 separate single-rate Two Color Markers applied in series
+      and on different elements.
+
+3.5.  Disadvantages
+
+   *  Rate Limitation: The rate for L4S flows is explicitly limited by
+      the policer (CIR to PIR) and cannot utilize the full link capacity
+      if Classic traffic is not utilizing the left-over capacity.  This
+      is less of a concern on large aggregation links or where
+      sufficient bandwidth is provisioned.  On the other hand, it means
+      that a minimum rate can be guaranteed for Classic traffic
+      (total_capacity - L4S_PIR), as L4S traffic cannot consume all
+      available excess capacity beyond the PIR and Classic traffic can
+      still use the full link capacity when no L4S traffic is active
+      ("speed test safe").
+
+   *  Fixed Rate Requirement: This solution is only viable where a
+      "safe" (non-blocking) and fixed rate can be reliably defined for
+      the link or network segment.  For links with large, unknown, or
+      highly variable capacity (wireless or highly variable priority
+      traffic), other solutions (e.g., AQM-based as described in
+      [RFC9332]) are more appropriate.
+
+3.6.  Two-Rate, Three-Color Marker (trTCM) Configuration
+
+   Proper configuration of the trTCM is crucial for the effective
+   operation of SRM.
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 6]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+3.6.1.  Burst Time
+
+   A burst time between 1ms and 10ms is generally sufficient for both
+   the PIR and CIR meters.  A default of 4 ms is RECOMMENDED.
+
+   *  Links that carry a large aggregate of flows could use a lower-
+      than-default value for burst time to ensure quicker reaction to
+      rate changes and less jitter impact for the lower priorities.
+
+   *  Links that are immediately following a bursty network technology
+      like Wi-Fi or 4G/5G might require a higher-than-default value to
+      accommodate natural bursts without premature marking or dropping.
+
+   If a burst size is needed for configuration (e.g., in bytes), the
+   following conversion SHOULD be used:
+
+      burst_size [Bytes] = information_rate [Bytes/s] * burst_time [s].
+
+3.6.2.  Peak Information Rate (PIR) Dimensioning
+
+   To prevent excessive latency for Classic traffic and avoid Classic
+   throughput starvation, the dropping PIR rate SHOULD be configured to
+   occur before any schedulers or shapers block due to oversubscription.
+
+   Typically, 30% to 50% of the total link capacity can be reserved for
+   Classic traffic when L4S is under full load (just before dropping
+   starts).  Therefore, a PIR rate of 50% to 70% of the total link
+   capacity is RECOMMENDED for L4S traffic.  This ensures that Classic
+   traffic always has a significant portion of the link capacity
+   available, even if L4S traffic is attempting to consume its maximum
+   allowed rate.
+
+   If a network node handles multiple subscriptions with isolation
+   between them, it can be considered to set the PIR closer to the
+   aggregate subscriber rate or remove the dropping PIR completely.  The
+   higher level scheduler will guarantee rate fairness between
+   subscribers, and misbehaving or overloaded subscribers will only
+   cause harm on themselves.
+
+3.6.3.  Committed Information Rate (CIR) and Excess Marking
+
+   The CIR marking policer acts as an "excess" marker.  For example, if
+   a 10 Gbps CIR is configured:
+
+   *  0.99% of packets will be marked CE if the aggregate L4S rate
+      reaches 10.1 Gbps.
+   *  50% of packets will be marked CE if the aggregate L4S rate reaches
+      20 Gbps.
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 7]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   Thus, the marking probability 'p' for L4S traffic exceeding the CIR
+   is given by:
+
+      p = (aggregate_rate - CIR) / aggregate_rate.
+
+   For steady-state Prague flows [RFC9332], the rule of thumb for the
+   rate per flow (Rpf) depends on the marking probability 'p' as
+   follows:
+
+      Rpf = (1/p) - 1 [Mbps].
+
+   Using the previous examples:
+
+   *  With 0.99% marking (p=0.0099), the Rpf would be approximately 100
+      Mbps.
+   *  With 50% marking (p=0.5), the Rpf would be 1 Mbps.
+
+   If 0.99% marking occurs on a 10 Gbps CIR rate, the aggregate arrival
+   rate will be 10.1 Gbps, this implies that approximately 10.1 Gbps /
+   100 Mbps = 101 capacity-seeking flows are active.  Similarly, to
+   reach a 50% marking rate, 20 Gbps / 1 Mbps = 20,000 capacity- seeking
+   flows would need to be active.
+
+   When a single L4S flow is present, its rate will be slightly above
+   the CIR.  As the number of flows increases or the absolute CIR rate
+   decreases, the aggregate rate will climb higher above the CIR.  At
+   some point, a very large amount of flows will cause the aggregate
+   rate to reach the PIR, at which point dropping begins.
+
+   The number of flows (N) at the point where the aggregate rate (N *
+   Rpf) is equal to the PIR can be approximated by:
+
+      N = PIR * ( PIR/CIR - 1 )
+
+   where PIR and CIR are expressed in Mbps.  If more than this number of
+   capacity-seeking flows are active, the aggregate rate will exceed the
+   PIR, and drops will begin.
+
+3.6.4.  PIR/CIR Ratio
+
+   The marking CIR and dropping PIR rates MUST be sufficiently separated
+   to allow a large number of flows to share the capacity and ensure L4S
+   flows can converge effectively.  The ratio between the dropping PIR
+   and the marking CIR SHOULD be at least a factor of 2.
+
+
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 8]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   This ratio allows for a significant portion of packets to be CE-
+   marked before drops occur, providing a robust signal for L4S
+   transports to reduce their rate.  It also supports slow start without
+   loss, as L4S slow start typically doubles the rate every RTT.
+
+3.6.5.  CIR Dimensioning
+
+   The RECOMMENDED PIR/CIR ratio of 2 is generally sufficient when the
+   number of flows is not expected to exceed the PIR expressed in Mbps
+   units (e.g., 1000 flows for a 1 Gbps PIR).
+
+   *  The PIR/CIR ratio MAY be reduced below the recommended factor of 2
+      for links with higher capacity or less aggregation, where the
+      impact of a smaller marking window is less critical.
+
+   *  The PIR/CIR ratio MAY need to be greater than 2 for constrained
+      links that carry a very large number of flows, to provide a higher
+      ECN marking probability before drops occur and to better
+      accommodate the dynamics of many concurrent flows.
+
+4.  Security Considerations
+
+   Similar as DualPI2 [RFC9332], also the SRM solution does not need to
+   inspect beyond the ECN field.  It is fully independent of higher
+   layer protocols and tunnels.  It poses no restrictions and traffic
+   can be further fully encrypted over the available IP layer.
+
+   The SRM solution relies on the proper classification and marking of
+   L4S traffic.  Misclassification, malicious marking of non-L4S traffic
+   as ECT(1), or exploiting L4S for DoS attacks will have no different
+   impact on other traffic as non-responsive traffic has on Classic-only
+   networks.  To the benefit of the SRM solution, due to the isolation,
+   on-purpose overload attacks will need to generate a mix of L4S and
+   Classic traffic to fully overload the network service, as the SRM
+   solution does not couple congestion between the traffic classes.
+
+5.  Contributors
+
+   Thanks to Greg White, and members of the TSVWG mailing list for their
+   contributions to this document.
+
+6.  IANA Considerations
+
+   This document has no IANA actions.
+
+7.  Normative References
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                 [Page 9]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/info/rfc2119>.
+
+   [RFC2698]  Heinanen, J. and R. Guerin, "A Two Rate Three Color
+              Marker", RFC 2698, DOI 10.17487/RFC2698, September 1999,
+              <https://www.rfc-editor.org/info/rfc2698>.
+
+   [RFC3168]  Ramakrishnan, K., Floyd, S., and D. Black, "The Addition
+              of Explicit Congestion Notification (ECN) to IP",
+              RFC 3168, DOI 10.17487/RFC3168, September 2001,
+              <https://www.rfc-editor.org/info/rfc3168>.
+
+   [RFC8174]  Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC
+              2119 Key Words", BCP 14, RFC 8174, DOI 10.17487/RFC8174,
+              May 2017, <https://www.rfc-editor.org/info/rfc8174>.
+
+   [RFC8311]  Black, D., "Relaxing Restrictions on Explicit Congestion
+              Notification (ECN) Experimentation", RFC 8311,
+              DOI 10.17487/RFC8311, January 2018,
+              <https://www.rfc-editor.org/info/rfc8311>.
+
+   [RFC9330]  Briscoe, B., Ed., De Schepper, K., Bagnulo, M., and G.
+              White, "Low Latency, Low Loss, and Scalable Throughput
+              (L4S) Internet Service: Architecture", RFC 9330,
+              DOI 10.17487/RFC9330, January 2023,
+              <https://www.rfc-editor.org/info/rfc9330>.
+
+   [RFC9331]  De Schepper, K. and B. Briscoe, Ed., "The Explicit
+              Congestion Notification (ECN) Protocol for Low Latency,
+              Low Loss, and Scalable Throughput (L4S)", RFC 9331,
+              DOI 10.17487/RFC9331, January 2023,
+              <https://www.rfc-editor.org/info/rfc9331>.
+
+   [RFC9332]  De Schepper, K., Briscoe, B., Ed., and G. White, "Dual-
+              Queue Coupled Active Queue Management (AQM) for Low
+              Latency, Low Loss, and Scalable Throughput (L4S)",
+              RFC 9332, DOI 10.17487/RFC9332, January 2023,
+              <https://www.rfc-editor.org/info/rfc9332>.
+
+Authors' Addresses
+
+   Koen De Schepper
+   Nokia
+   Email: koen.de_schepper@nokia-bell-labs.com
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                [Page 10]
+
+Internet-Draft         L4S Static Rate Management              July 2026
+
+
+   Miroslav Vrana
+   Nokia
+   Email: miroslav.vrana@nokia.com
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+De Schepper & Vrana      Expires 4 January 2027                [Page 11]
