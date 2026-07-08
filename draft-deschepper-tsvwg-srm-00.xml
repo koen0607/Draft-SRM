@@ -227,6 +227,21 @@
       signalled via rate excess rather than queue build-up.</t>
           </li>
           <li>
+            <t>Maring excess rate: The gradual marking probability applied
+      by the excess marking trTCM results in both an immediate, gradual and
+      very stable marking. As a result Prague flows will quickly settle to
+      the target rate and will be able to maintain a sawtoothless per RTT stable
+      marking probability and rate. The typical immediate STEP AQM will introduce
+      so called "ON/OFF marking patters" with at least one RTT 100% marks
+      and several RTTs 0% marked. This results in a sawtooth and deviations from 
+      both the r ~= 1/p behaviour and for RTTs > 25ms also from the r ~= 1/rtt behaviour.
+      An immediate RAMP AQM might result in a similar more stable behavior under very limited
+      conditions, but with compromising in terms of latency as the slope needs to 
+      be very gentle to achieve this behavior. If not the slope will be quickly
+      overrun by the sawtooth and resulting in ON/OFF behaviour again.
+      </t>
+          </li>
+          <li>
             <t>Predictable Performance: SRM provides predictable performance
       for L4S traffic within the defined rate limits (CIR and PIR).
       The rate is only limited by the number of applications that are
@@ -278,6 +293,14 @@
       highly variable capacity (wireless or highly variable priority
       traffic), other solutions (e.g., AQM-based as described in <xref target="RFC9332"/>)
       are more appropriate.</t>
+          </li>
+          <li>
+            <t>Maring excess rate: The excess marking trTCM will result in
+      a throughput that is larger than the configured CIR. The excess depends on 
+      the marking probability that is needed. For high rates per flow that settle 
+      at a very low and stable marking probability, this execess
+      will be very low. If the link capacity is low or highly loaded with a low 
+      per flow expected rate, a lower than intended CIR configuration can be considered.</t>
           </li>
         </ul>
       </section>
