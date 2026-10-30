@@ -227,7 +227,7 @@
       signalled via rate excess rather than queue build-up.</t>
           </li>
           <li>
-            <t>Maring excess rate: The gradual marking probability applied
+            <t>Marking excess rate: The gradual marking probability applied
       by the excess marking trTCM results in both an immediate, gradual and
       very stable marking. As a result Prague flows will quickly settle to
       the target rate and will be able to maintain a sawtoothless per RTT stable
@@ -295,7 +295,7 @@
       are more appropriate.</t>
           </li>
           <li>
-            <t>Maring excess rate: The excess marking trTCM will result in
+            <t>Marking excess rate: The excess marking trTCM will result in
       a throughput that is larger than the configured CIR. The excess depends on 
       the marking probability that is needed. For high rates per flow that settle 
       at a very low and stable marking probability, this execess
